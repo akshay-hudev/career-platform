@@ -24,9 +24,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r backend/requirements.txt
-          python -m spacy download en_core_web_sm
-
+            pip install -r backend/requirements.txt
+            pip install "psycopg[binary]" "pydantic[email]" email-validator
+            python -m spacy download en_core_web_sm
       - name: Run tests
         env:
           DATABASE_URL: sqlite:///./test.db
