@@ -27,10 +27,9 @@ def get_model():
 
 
 def get_embedding(text: str) -> list[float]:
-    """Generate sentence embedding for a text string."""
-    model = get_model()
-    embedding = model.encode(text, convert_to_tensor=False)
-    return embedding.tolist()
+    """Generate TF-IDF vector for a text string."""
+    matrix = _vectorizer.fit_transform([text])
+    return matrix.toarray()[0].tolist()
 
 
 def cosine_similarity_score(emb1: list[float], emb2: list[float]) -> float:

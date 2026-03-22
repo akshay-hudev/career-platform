@@ -18,13 +18,7 @@ class Settings(BaseSettings):
     # App
     SECRET_KEY: str = "change-this-in-production"
     DEBUG: bool = True
-    CORS_ORIGINS: list = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://career-platform-delta.vercel.app",
-    "https://career-platform-git-main-akshay-hudevs-projects.vercel.app",
-    "https://career-platform-akshay-hudevs-projects.vercel.app",
-]
+    CORS_ORIGINS: list = ["*"]
 
     class Config:
         env_file = ".env"
