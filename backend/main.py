@@ -4,8 +4,7 @@ from contextlib import asynccontextmanager
 
 from backend.database import Base, engine
 from backend.config import settings
-from backend.routers import resume, jobs, match, users, agent, interview
-
+from backend.routers import resume, jobs, match, users, agent, interview, auth
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,7 +38,7 @@ app.include_router(jobs.router)
 app.include_router(match.router)
 app.include_router(agent.router)
 app.include_router(interview.router)
-
+app.include_router(auth.router)
 
 @app.get("/")
 def root():

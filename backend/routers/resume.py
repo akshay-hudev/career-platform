@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 
-from backend.database import get_db
+from backend.dependencies import get_current_user
 from backend.models.models import Resume, User
 from backend.schemas.schemas import ResumeOut
 from backend.services.resume_parser import parse_resume
@@ -15,9 +15,10 @@ router = APIRouter(prefix="/api/v1/resume", tags=["Resume"])
 @router.post("/upload", response_model=ResumeOut)
 async def upload_resume(
     file: UploadFile = File(...),
-    user_id: int = Query(..., description="User ID"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),  # ADD THIS
 ):
+    user_id = current_user.id  # use this instead of query param
     """
     Upload a PDF resume. Returns parsed data, ATS score, and extracted skills.
     """

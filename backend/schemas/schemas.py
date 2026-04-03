@@ -3,6 +3,21 @@ from typing import Optional, List
 from datetime import datetime
 from backend.models.models import JobStatus
 
+# ── Auth Schemas ──────────────────────────────────────────────────────────────
+
+class UserRegister(BaseModel):
+    email: EmailStr
+    name: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: "UserOut"
 
 # ── User Schemas ──────────────────────────────────────────────────────────────
 

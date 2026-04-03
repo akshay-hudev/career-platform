@@ -5,13 +5,30 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('career_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('career_token')
+      localStorage.removeItem('career_user')
+      window.location.href = '/login'
+    }
     const message = err.response?.data?.detail || 'Something went wrong.'
     return Promise.reject(new Error(message))
   }
 )
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+export const registerUser = (data) => api.post('/auth/register', data)
+export const loginUser = (data) => api.post('/auth/login', data)
 
 // ── Users ────────────────────────────────────────────────────────────────────
 export const createUser = (data) => api.post('/users/', data)

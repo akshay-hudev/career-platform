@@ -17,3 +17,5 @@ langgraph
 langchain-core
 numpy
 scikit-learn
+python-jose[cryptography]
+passlib[bcrypt]
