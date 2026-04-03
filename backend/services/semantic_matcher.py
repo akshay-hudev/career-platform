@@ -54,17 +54,14 @@ def extract_skills_from_text(text: str) -> set[str]:
 
 
 def compute_match(resume_text, resume_embedding, job_description, job_index=0):
-    # Fit vectorizer on both texts together so vocabulary matches
     combined = _vectorizer.fit_transform([resume_text[:3000], job_description])
     resume_emb = combined[0].toarray()[0].tolist()
     job_emb = combined[1].toarray()[0].tolist()
     score = cosine_similarity_score(resume_emb, job_emb)
-    
     resume_skills = extract_skills_from_text(resume_text)
     job_skills = extract_skills_from_text(job_description)
     matched = sorted(resume_skills & job_skills)
     gaps = sorted(job_skills - resume_skills)
-    
     return {
         "index": job_index,
         "score": score,
