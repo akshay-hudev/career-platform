@@ -3,7 +3,7 @@ import unittest.mock as mock
 import io
 
 
-def _upload_resume(client, user_id: int) -> int:
+def _upload_resume(client, user_id: int = None) -> int:
     """Helper: upload a fake resume and return its ID."""
     fake_pdf = (
         b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
@@ -25,7 +25,7 @@ def _upload_resume(client, user_id: int) -> int:
                 text="Experienced Python developer with 3 years of backend experience."
             )
             res = client.post(
-                f"/api/v1/resume/upload?user_id={user_id}",
+                "/api/v1/resume/upload",
                 files={"file": ("resume.pdf", io.BytesIO(fake_pdf), "application/pdf")},
             )
     assert res.status_code == 200, f"Resume upload failed: {res.text}"

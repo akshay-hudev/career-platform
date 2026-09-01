@@ -2,15 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from backend.database import Base, engine
-from backend.config import settings
+from backend.config import assert_production_safe, settings
 from backend.routers import resume, jobs, match, users, agent, interview, auth
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all database tables on startup
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created.")
+    # Fail fast on insecure SECRET_KEY / wildcard CORS when not in DEBUG.
+    assert_production_safe()
+    # Database schema is managed by Alembic (see backend/alembic). Do NOT call
+    # Base.metadata.create_all here — that would bypass migrations.
     yield
     print("🛑 Application shutdown.")
 
@@ -22,10 +22,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow React dev server
+# CORS — restricted to the configured allow-list (no wildcard in production).
+_cors_origins = settings.parse_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

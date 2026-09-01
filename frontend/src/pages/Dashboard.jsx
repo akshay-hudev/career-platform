@@ -24,14 +24,14 @@ export default function Dashboard() {
   const { user } = useUser()
 
   const { data: resumes = [] } = useQuery({
-    queryKey: ['resumes', user?.id],
-    queryFn: () => listResumes(user.id).then(r => r.data),
+    queryKey: ['resumes'],
+    queryFn: () => listResumes().then(r => r.data),
     enabled: !!user,
   })
 
   const { data: savedJobs = [] } = useQuery({
-    queryKey: ['savedJobs', user?.id],
-    queryFn: () => getSavedJobs(user.id).then(r => r.data),
+    queryKey: ['savedJobs'],
+    queryFn: () => getSavedJobs().then(r => r.data),
     enabled: !!user,
   })
 

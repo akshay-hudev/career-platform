@@ -1,6 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend.dependencies import get_current_user
+from backend.models.models import User
 from backend.services.career_agent import run_career_agent
 
 router = APIRouter(prefix="/api/v1/agent", tags=["Agent"])
@@ -27,18 +32,10 @@ async def run_agent(
     file: UploadFile = File(...),
     job_query: str = Query(..., description="e.g. 'Backend Engineer'"),
     location: str = Query(default="India"),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    One-shot LangGraph career agent.
-
-    Upload a resume PDF and get back:
-    - Parsed skills + ATS score
-    - Top 20 jobs ranked by semantic similarity
-    - AI-generated cover letter, skill gaps, interview tips
-
-    This runs the full 4-node graph:
-    parse_resume → search_jobs → rank_matches → generate_advice
-    """
+    """One-shot LangGraph career agent (auth required to prevent anonymous
+    abuse of the Gemini/Adzuna quota)."""
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files supported.")
 

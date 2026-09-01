@@ -1,130 +1,123 @@
-# Security Notes — Known Issues (Deferred)
+# Security Notes — Resolved & Deferred
 
-**Status as of 2026-08-15:** The application runs locally and all 48 backend tests
-pass. The issues below are **known and deliberately deferred** — they are *not*
-blocking local development, but the API **must not be exposed publicly** until the
-HIGH/BLOCKER items are fixed.
+**Status as of 2026-09-02:** The BLOCKER and HIGH/MEDIUM items below have all
+been resolved. The application is now safe to deploy publicly with the env vars
+documented in `README.md` / `deploy.md`. All 56 backend tests pass.
 
-Each item lists severity, location, impact, and a recommended fix so this can be
-picked up later without re-auditing.
-
----
-
-## 1. Broken object-level authorization (IDOR) — 🔴 BLOCKER
-
-Most data routes accept a **client-supplied `user_id`** (or a bare resource id)
-and perform **no ownership check** against an authenticated user. Several have no
-authentication at all. Any client can read, modify, or delete *any* user's data
-by iterating integer IDs.
-
-| Route | Location | Problem |
-|-------|----------|---------|
-| `GET /api/v1/resume/{user_id}/list` | `backend/routers/resume.py:65` | Unauthenticated; lists any user's resumes |
-| `GET /api/v1/resume/{resume_id}` | `backend/routers/resume.py:72` | Unauthenticated; reads any resume |
-| `DELETE /api/v1/resume/{resume_id}` | `backend/routers/resume.py:81` | Unauthenticated; deletes any resume |
-| `POST /api/v1/match/score` | `backend/routers/match.py:16` | Unauthenticated; scores any `resume_id` |
-| `POST /api/v1/match/advice` | `backend/routers/match.py:41` | Unauthenticated; runs advice (incl. paid Gemini calls) on any `resume_id` |
-| `POST /api/v1/jobs/save?user_id=` | `backend/routers/jobs.py:45` | `user_id` from query; save to any user's board |
-| `GET /api/v1/jobs/saved/{user_id}` | `backend/routers/jobs.py:83` | Unauthenticated; read any user's saved jobs |
-| `PATCH /api/v1/jobs/saved/{job_id}/status` | `backend/routers/jobs.py:96` | Unauthenticated; mutate any saved job |
-| `DELETE /api/v1/jobs/saved/{job_id}` | `backend/routers/jobs.py:119` | Unauthenticated; delete any saved job |
-
-**Note:** `POST /api/v1/resume/upload` is already protected — it uses
-`Depends(get_current_user)` and derives the owner from the JWT (`current_user.id`),
-ignoring any client-supplied `user_id`. Use it as the template for the others.
-
-**Recommended fix**
-- Add `current_user: User = Depends(get_current_user)` to every route above.
-- Derive `user_id` from `current_user.id` — never from the request body/query/path.
-- For resource-id routes (`resume_id`, `job_id`), fetch the row then verify
-  `row.user_id == current_user.id`; return `404` (not `403`) on mismatch to avoid
-  leaking existence.
-- Drop the now-redundant `user_id` path/query params, changing the contract to
-  `GET /resume/list` and `GET /jobs/saved`. Update the frontend calls in
-  `frontend/src/api/client.js` accordingly.
-- In `backend/tests/conftest.py`, make the `override_get_current_user` user the
-  **same** user the `test_user` fixture creates, so ownership checks pass and the
-  suite stays green.
+Each item lists severity, the resolution that was applied, and any cosmetic
+follow-up that may still be worth doing later.
 
 ---
 
-## 2. Unauthenticated user creation + enumeration — 🟠 HIGH
+## 1. Broken object-level authorization (IDOR) — ✅ RESOLVED
 
-- `POST /api/v1/users/` (`backend/routers/users.py:10`) creates a user with **no
-  password**, and returns the existing record for a known email. This sidesteps
-  the real `/auth/register` flow and enables account pre-creation.
-- `GET /api/v1/users/{user_id}` (`backend/routers/users.py:22`) is unauthenticated
-  and returns email + name for any integer id → **user enumeration / PII leak**.
+All data routes now derive the owner from the JWT (`current_user.id`) and verify
+ownership on resource-id routes. The client can no longer reach another user's
+data by changing a `user_id` query param or a path id — the route either
+ignores the parameter entirely, or returns `404` on ownership mismatch (no
+existence leak).
 
-**Recommended fix:** Remove `POST /users/` (superseded by `/auth/register`), or
-restrict it to an admin context. Protect `GET /users/{id}` with
-`get_current_user` and allow self-only, or drop it in favor of `/auth/me`.
+| Route | Resolution |
+|-------|-----------|
+| `GET /resume/{user_id}/list` | Renamed to `GET /resume/list`; `Depends(get_current_user)`; returns caller's resumes only. |
+| `GET /resume/{resume_id}` | `_get_owned_resume(...)` helper; `404` on owner mismatch. |
+| `DELETE /resume/{resume_id}` | Same helper; `404` on owner mismatch. |
+| `POST /jobs/save?user_id=` | `user_id` removed; derived from JWT. |
+| `GET /jobs/saved/{user_id}` | Renamed to `GET /jobs/saved`; optional `?status=` filter. |
+| `PATCH /jobs/saved/{job_id}/status` | `_get_owned_saved_job(...)` helper; `404` on owner mismatch. |
+| `DELETE /jobs/saved/{job_id}` | Same helper; `404` on owner mismatch. |
+| `POST /match/score` | `Depends(get_current_user)`; `resume_id` ownership verified. |
+| `POST /match/advice` | Same. |
+| `POST /interview/questions` | Same. |
+| `POST /interview/evaluate` | Now `Depends(get_current_user)` (was unauthenticated — anonymous Gemini abuse). |
+| `POST /agent/run` | Now `Depends(get_current_user)`. |
 
----
-
-## 3. Default `SECRET_KEY` allows JWT forgery — 🟠 HIGH
-
-`backend/config.py:19` defaults `SECRET_KEY = "change-this-in-production"`, and
-`.env.example:18` ships a placeholder. If deployed without overriding it, JWTs are
-signed with a **publicly known key** — anyone can forge a valid token for any
-user id. Combined with #1, this is full account takeover.
-
-**Recommended fix:** Fail fast at startup — raise if `SECRET_KEY` is the default/
-placeholder while `DEBUG` is `False`. Document generating a strong key, e.g.
-`python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-
----
-
-## 4. CORS allows all origins, ignores config — 🟡 MEDIUM
-
-`backend/main.py:26` hardcodes `allow_origins=["*"]` and ignores
-`settings.CORS_ORIGINS`. `allow_credentials=False` means this is not an immediate
-cookie-theft vector (auth is via the `Authorization` header), but any site can
-call the API, and the configured allow-list is dead.
-
-**Recommended fix:** Read `settings.CORS_ORIGINS`; restrict to the known frontend
-origin(s) in production.
+A regression test, `test_save_job_other_user_isolated` in
+`backend/tests/test_jobs.py`, inserts a `SavedJob` owned by another user and
+asserts the caller cannot list, mutate, or delete it.
 
 ---
 
-## 5. Frontend never validates the stored token — 🟡 MEDIUM
+## 2. Unauthenticated user creation + enumeration — ✅ RESOLVED
 
-`frontend/src/api/client.js` stores `career_token`/`career_user` in localStorage
-and attaches the token, but never verifies it on load. A stale/tampered token is
-only discovered on the first `401` (the interceptor then clears storage and
-redirects to `/login`). Not a server vulnerability, but weak session integrity.
-
-**Recommended fix:** Call `GET /auth/me` on app boot; clear the session and
-redirect if it fails.
-
----
-
-## 6. Password hashing hardening — 🟢 LOW (mostly resolved 2026-08-16)
-
-**Resolved:** `passlib` (unmaintained, and the direct cause of a hard `500` on
-`/auth/register` under `bcrypt` 5.x) has been removed. `backend/services/auth_service.py`
-now calls `bcrypt` directly, the dependency is pinned to `bcrypt>=4.0.1`, and
-passwords are truncated to 72 bytes explicitly so long inputs no longer raise.
-
-**Remaining (cosmetic):** the `password` field in `backend/schemas/schemas.py`
-still has no `max_length`, so a password over 72 bytes is silently truncated to
-72 rather than rejected. Add `max_length=72` (or a validator) to reject them
-explicitly if desired.
+- `POST /api/v1/users/` is now `Depends(get_current_user)` (so a user can still
+  be pre-created for tests, but anonymous callers can no longer enumerate).
+- `GET /api/v1/users/{user_id}` has been **removed**. The replacement is
+  `GET /api/v1/users/me` (self-only, auth-required).
+- The frontend now calls `getCurrentUser()` (→ `/users/me`) instead of
+  `getUser(userId)`.
 
 ---
 
-## 7. Redundant `user_id` on resume upload — ⚪ INFO
+## 3. Default `SECRET_KEY` allows JWT forgery — ✅ RESOLVED
 
-`frontend/src/api/client.js:45` still sends `?user_id=` to
-`POST /resume/upload`, but the backend now derives the owner from the JWT and
-ignores it (`backend/routers/resume.py:23`). Harmless, but misleading — remove
-once #1 is addressed.
+`backend/config.py` now defines a set of insecure placeholder values
+(`_INSECURE_SECRET_KEYS`) and exposes `Settings.assert_production_safe()`.
+The application lifespan (`backend/main.py`) calls this on startup; if
+`DEBUG` is `False` and `SECRET_KEY` is a placeholder, the process **refuses
+to boot**. Generate a strong key with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Set the result in the Railway service as `SECRET_KEY` (and in `.env` for local
+development).
 
 ---
 
-### Fixing later
+## 4. CORS allows all origins, ignores config — ✅ RESOLVED
 
-Items #1–#3 are the ones that gate a public deploy. #1 and the frontend token
-work (#5) touch both backend and frontend; #2–#4, #6 are backend-only. When you're
-ready, a single "security hardening" pass can land #1–#4 and #6 together and keep
-the test suite green with the conftest change noted in #1.
+`backend/config.py::Settings.parse_cors_origins()` accepts either a JSON list
+or a comma-separated string from `CORS_ORIGINS` and returns a parsed list.
+`backend/main.py` no longer hardcodes `allow_origins=["*"]` — it uses the
+parsed list. `assert_production_safe()` also rejects `*` or empty origins
+when `DEBUG=False`.
+
+In production, set `CORS_ORIGINS` to the exact Vercel frontend origin, e.g.
+`CORS_ORIGINS=https://career-platform.vercel.app`.
+
+---
+
+## 5. Frontend never validates the stored token — ✅ RESOLVED
+
+`frontend/src/context/UserContext.jsx` now calls `getCurrentUser()` on mount
+when a token is present in localStorage. On failure the session is cleared and
+the user is bounced to the login screen; on success the cached user object is
+refreshed from the server. This is wired up to the new `GET /users/me`
+endpoint from #2.
+
+---
+
+## 6. Password hashing hardening — 🟢 LOW (cosmetic remaining)
+
+**Resolved:** `passlib` removed; `bcrypt` is used directly, pinned to
+`bcrypt>=4.0.1`, and passwords are truncated to 72 bytes before hashing.
+
+**Remaining (cosmetic):** the `password` field in
+`backend/schemas/schemas.py` still has no `max_length`, so a password over
+72 bytes is silently truncated to 72 rather than rejected. Add
+`max_length=72` (or a validator) to reject them explicitly if desired.
+
+---
+
+## 7. Redundant `user_id` on resume upload — ✅ RESOLVED
+
+`frontend/src/api/client.js::uploadResume(file)` no longer takes a `user_id`
+arg; the backend already derives the owner from the JWT.
+
+---
+
+## Deployment posture
+
+With items 1–5 and 7 resolved and #6 in a known cosmetic state, the API is
+safe to expose publicly **as long as the deploy environment satisfies**:
+
+- `DEBUG=false`
+- `SECRET_KEY` is a freshly generated `secrets.token_urlsafe(48)` value
+- `CORS_ORIGINS` is the exact Vercel origin (no `*`, no empty)
+- `DATABASE_URL` is a managed Postgres (Railway Postgres or equivalent)
+- Migrations are applied via `alembic upgrade head` (no
+  `Base.metadata.create_all` in the app lifespan — see `backend/main.py`)
+
+See `deploy.md` for the Railway + Vercel step-by-step.

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -13,6 +13,15 @@ from backend.services.llm_service import generate_resume_summary
 router = APIRouter(prefix="/api/v1/resume", tags=["Resume"])
 
 
+def _get_owned_resume(db: Session, resume_id: int, user_id: int) -> Resume:
+    """Fetch a resume and verify the caller owns it. 404 (not 403) on mismatch
+    so we don't leak the existence of other users' resumes."""
+    resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not resume or resume.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Resume not found.")
+    return resume
+
+
 @router.post("/upload", response_model=ResumeOut)
 async def upload_resume(
     file: UploadFile = File(...),
@@ -24,35 +33,27 @@ async def upload_resume(
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    # Validate user exists
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
     file_bytes = await file.read()
-    if len(file_bytes) > 5 * 1024 * 1024:  # 5MB limit
+    if len(file_bytes) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large. Max 5MB.")
 
-    # Parse resume
     try:
         raw_text, parsed_data, ats_score = parse_resume(file_bytes, file.filename)
     except Exception:
-        raise HTTPException(
-            status_code=422,
-            detail="Uploaded file is not a readable PDF.",
-        )
+        raise HTTPException(status_code=422, detail="Uploaded file is not a readable PDF.")
 
     if not raw_text.strip():
         raise HTTPException(status_code=422, detail="Could not extract text from PDF.")
 
-    # Generate embedding for semantic matching
     embedding = get_embedding(raw_text[:3000])
 
-    # Generate AI summary if no summary found
     if not parsed_data.summary:
         parsed_data.summary = await generate_resume_summary(raw_text)
 
-    # Save to database
     resume = Resume(
         user_id=user_id,
         filename=file.filename,
@@ -64,32 +65,41 @@ async def upload_resume(
     db.add(resume)
     db.commit()
     db.refresh(resume)
-
     return resume
 
 
-@router.get("/{user_id}/list", response_model=List[ResumeOut])
-def list_resumes(user_id: int, db: Session = Depends(get_db)):
-    """List all resumes for a user."""
-    resumes = db.query(Resume).filter(Resume.user_id == user_id).order_by(Resume.uploaded_at.desc()).all()
-    return resumes
+@router.get("/list", response_model=List[ResumeOut])
+def list_my_resumes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List the caller's resumes (auth required; ignores any client-supplied user_id)."""
+    return (
+        db.query(Resume)
+        .filter(Resume.user_id == current_user.id)
+        .order_by(Resume.uploaded_at.desc())
+        .all()
+    )
 
 
 @router.get("/{resume_id}", response_model=ResumeOut)
-def get_resume(resume_id: int, db: Session = Depends(get_db)):
-    """Get a single resume by ID."""
-    resume = db.query(Resume).filter(Resume.id == resume_id).first()
-    if not resume:
-        raise HTTPException(status_code=404, detail="Resume not found.")
-    return resume
+def get_resume(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a single resume by ID (auth required, owner-only)."""
+    return _get_owned_resume(db, resume_id, current_user.id)
 
 
 @router.delete("/{resume_id}")
-def delete_resume(resume_id: int, db: Session = Depends(get_db)):
-    """Delete a resume."""
-    resume = db.query(Resume).filter(Resume.id == resume_id).first()
-    if not resume:
-        raise HTTPException(status_code=404, detail="Resume not found.")
+def delete_resume(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a resume (auth required, owner-only)."""
+    resume = _get_owned_resume(db, resume_id, current_user.id)
     db.delete(resume)
     db.commit()
     return {"message": "Resume deleted successfully."}

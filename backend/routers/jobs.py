@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from backend.database import get_db
+from backend.dependencies import get_current_user
 from backend.models.models import SavedJob, Resume, User
 from backend.schemas.schemas import (
     JobSearchRequest, JobSearchResponse, JobResult,
@@ -14,26 +15,33 @@ from backend.services.semantic_matcher import rank_jobs
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
 
 
+def _get_owned_saved_job(db: Session, job_id: int, user_id: int) -> SavedJob:
+    """Fetch a saved job and verify the caller owns it. 404 on mismatch."""
+    job = db.query(SavedJob).filter(SavedJob.id == job_id).first()
+    if not job or job.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Saved job not found.")
+    return job
+
+
 @router.post("/search", response_model=JobSearchResponse)
 async def search(
     request: JobSearchRequest,
     resume_id: Optional[int] = Query(None, description="Optionally rank by resume match"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Search jobs via Adzuna API (cached in Redis).
-    If resume_id is provided, results are ranked by semantic similarity.
-    """
+    """Search jobs via Adzuna API (cached in Redis). If resume_id is provided,
+    results are ranked by semantic similarity (the resume must belong to the caller)."""
     jobs = await search_jobs(request.query, request.location, request.results)
 
-    # Semantic ranking if resume provided
     if resume_id and jobs:
         resume = db.query(Resume).filter(Resume.id == resume_id).first()
-        if resume and resume.embedding_json:
+        if not resume or resume.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Resume not found.")
+        if resume.embedding_json:
             jobs = rank_jobs(resume.raw_text, resume.embedding_json, jobs)
 
     job_results = [JobResult(**j) for j in jobs]
-
     return JobSearchResponse(
         query=request.query,
         location=request.location,
@@ -45,24 +53,19 @@ async def search(
 @router.post("/save", response_model=SavedJobOut)
 def save_job(
     request: SaveJobRequest,
-    user_id: int = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Save a job to the user's board."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    # Prevent duplicate saves
+    """Save a job to the caller's board (owner is taken from the JWT)."""
     existing = db.query(SavedJob).filter(
-        SavedJob.user_id == user_id,
+        SavedJob.user_id == current_user.id,
         SavedJob.job_external_id == request.job_external_id,
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail="Job already saved.")
 
     job = SavedJob(
-        user_id=user_id,
+        user_id=current_user.id,
         resume_id=request.resume_id,
         job_external_id=request.job_external_id,
         title=request.title,
@@ -80,14 +83,14 @@ def save_job(
     return job
 
 
-@router.get("/saved/{user_id}", response_model=List[SavedJobOut])
-def get_saved_jobs(
-    user_id: int,
+@router.get("/saved", response_model=List[SavedJobOut])
+def get_my_saved_jobs(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get all saved jobs for a user, optionally filtered by status."""
-    query = db.query(SavedJob).filter(SavedJob.user_id == user_id)
+    """Get the caller's saved jobs, optionally filtered by status."""
+    query = db.query(SavedJob).filter(SavedJob.user_id == current_user.id)
     if status:
         query = query.filter(SavedJob.status == status)
     return query.order_by(SavedJob.saved_at.desc()).all()
@@ -98,11 +101,10 @@ def update_status(
     job_id: int,
     update: UpdateJobStatus,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Update a saved job's application status (Kanban drag-and-drop)."""
-    job = db.query(SavedJob).filter(SavedJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Saved job not found.")
+    """Update a saved job's application status (auth required, owner-only)."""
+    job = _get_owned_saved_job(db, job_id, current_user.id)
 
     job.status = update.status
     if update.notes is not None:
@@ -117,11 +119,13 @@ def update_status(
 
 
 @router.delete("/saved/{job_id}")
-def delete_saved_job(job_id: int, db: Session = Depends(get_db)):
-    """Remove a job from the saved board."""
-    job = db.query(SavedJob).filter(SavedJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Saved job not found.")
+def delete_saved_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove a saved job (auth required, owner-only)."""
+    job = _get_owned_saved_job(db, job_id, current_user.id)
     db.delete(job)
     db.commit()
     return {"message": "Job removed."}

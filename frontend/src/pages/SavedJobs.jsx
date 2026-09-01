@@ -85,14 +85,14 @@ export default function SavedJobs() {
   const queryClient = useQueryClient()
 
   const { data: jobs = [], isLoading } = useQuery({
-    queryKey: ['savedJobs', user?.id],
-    queryFn: () => getSavedJobs(user.id).then(r => r.data),
+    queryKey: ['savedJobs'],
+    queryFn: () => getSavedJobs().then(r => r.data),
     enabled: !!user,
   })
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }) => updateJobStatus(id, status),
-    onSuccess: () => queryClient.invalidateQueries(['savedJobs', user.id]),
+    onSuccess: () => queryClient.invalidateQueries(['savedJobs']),
     onError: (e) => toast.error(e.message),
   })
 

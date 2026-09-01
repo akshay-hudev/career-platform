@@ -20,7 +20,7 @@ FastAPI backend + React 18 (Vite) frontend, PostgreSQL, and Redis.
 | AI | Google Gemini via `google-generativeai` (configurable `GEMINI_MODEL`, default 2.5 Flash) |
 | Agent | LangGraph pipeline (parse → search → rank → advice) |
 | Job data | Adzuna API over httpx (mock fallback when keys are absent) |
-| Deployment | Docker (Compose runs Postgres + Redis + backend); Railway + Vercel in prod |
+| Deployment | Docker (Compose runs Postgres + Redis + backend); Railway (backend) + Vercel (frontend) in prod |
 
 > **Note:** resume parsing and matching are **not** ML/NLP embeddings — there is no
 > spaCy and no sentence-transformers in this project. Parsing is `pdfplumber` text
@@ -30,12 +30,12 @@ FastAPI backend + React 18 (Vite) frontend, PostgreSQL, and Redis.
 ## Architecture
 
 ```
-React SPA (Vite :5173)
-   │  /api/v1/*   (Vite dev proxy → :8000, or VITE_API_URL in prod)
+React SPA (Vite :5173)                            Vercel static
+   │  /api/v1/*   (VITE_API_URL → Railway backend in prod; Vite proxy in dev)
    ▼
 FastAPI (:8000)        — JWT auth on protected routes
    ├── /auth        register · login · me
-   ├── /users       create · get
+   ├── /users       create (auth) · me
    ├── /resume      upload (pdfplumber parse + ATS score) · list · get · delete
    ├── /jobs        search (Adzuna + Redis cache, mock fallback) · save · saved · status · delete
    ├── /match       score (TF-IDF cosine + skill gaps) · advice (Gemini)
@@ -120,12 +120,12 @@ Backend settings are read from `.env` (see `.env.example`). Env vars and default
 | `GEMINI_API_KEY` | *(empty)* | **Required for real AI output** (advice, interview, summaries). Without it, those endpoints return canned fallback content instead of failing. |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name. |
 | `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | *(empty)* | Optional. Without them, job search serves realistic **mock** Indian job data. |
-| `SECRET_KEY` | `change-this-in-production` | Signs JWTs. **Must be overridden in production.** |
+| `SECRET_KEY` | `change-this-in-production` | Signs JWTs. **Must be overridden in production** — generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. The app refuses to boot when `DEBUG=false` and this is a placeholder. |
 | `DATABASE_URL` | `postgresql+psycopg://postgres:password@localhost:5432/careerdb` | Postgres URL (psycopg v3). A bare `postgres://` / `postgresql://` is auto-rewritten to `postgresql+psycopg://`. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Job-search cache. If Redis is unreachable, caching no-ops (no crash). |
-| `DEBUG` | `True` | Debug flag. |
-| `CORS_ORIGINS` | `["*"]` | Allowed origins (see Known Issues — CORS is currently hardcoded to `*` in `main.py`). |
-| `VITE_API_URL` *(frontend)* | *(empty in dev)* | Production API base; used as `${VITE_API_URL}/api/v1`. In dev it's empty and the Vite proxy forwards `/api` → `:8000`. |
+| `DEBUG` | `True` | Debug flag. **Must be `false` in production** (enables the secret-key/CORS safety checks). |
+| `CORS_ORIGINS` | `["*"]` | Allowed origins. Accepts a JSON list (`["https://a.com","https://b.com"]`) or a comma-separated string (`https://a.com,https://b.com`). In production set this to the exact Vercel frontend origin — no `*`, no empty list. |
+| `VITE_API_URL` *(frontend)* | *(empty in dev)* | Production API base; used as `${VITE_API_URL}/api/v1`. In dev it's empty and the Vite proxy forwards `/api` → `:8000`. **In prod set this to the Railway backend URL, e.g. `https://career-platform.up.railway.app` (no trailing slash).** |
 
 ### API keys
 
@@ -143,22 +143,22 @@ All under prefix `/api/v1`. Routes marked 🔒 require a JWT (`Authorization: Be
 | POST | `/auth/register` | Create account, returns JWT + user |
 | POST | `/auth/login` | Authenticate, returns JWT + user |
 | GET | `/auth/me` 🔒 | Current authenticated user |
-| POST | `/users/` | Idempotent, passwordless user create (returns existing on duplicate email) |
-| GET | `/users/{user_id}` | Fetch a user |
-| POST | `/resume/upload` 🔒 | Upload & parse a PDF, compute ATS score |
-| GET | `/resume/{user_id}/list` | List a user's resumes |
-| GET | `/resume/{resume_id}` | Get one resume |
-| DELETE | `/resume/{resume_id}` | Delete a resume |
+| POST | `/users/` 🔒 | Idempotent, passwordless user create (returns existing on duplicate email) — auth required |
+| GET | `/users/me` 🔒 | Self — returns the authenticated user's profile |
+| POST | `/resume/upload` 🔒 | Upload & parse a PDF, compute ATS score (owner derived from JWT) |
+| GET | `/resume/list` 🔒 | List the caller's resumes |
+| GET | `/resume/{resume_id}` 🔒 | Get one of the caller's resumes (404 if not owner) |
+| DELETE | `/resume/{resume_id}` 🔒 | Delete one of the caller's resumes (404 if not owner) |
 | POST | `/jobs/search` | Adzuna search (optional semantic rank via `?resume_id`) |
-| POST | `/jobs/save` | Save a job to the board (`?user_id`) |
-| GET | `/jobs/saved/{user_id}` | List saved jobs (optional `?status`) |
-| PATCH | `/jobs/saved/{job_id}/status` | Update application status |
-| DELETE | `/jobs/saved/{job_id}` | Remove a saved job |
-| POST | `/match/score` | Score a resume against job descriptions (cosine + skill gaps) |
-| POST | `/match/advice` | Full Gemini advice (skill gaps, cover letter, interview tips) |
-| POST | `/interview/questions` | Generate interview questions by type |
-| POST | `/interview/evaluate` | Evaluate a mock-interview answer |
-| POST | `/agent/run` | One-shot LangGraph pipeline from an uploaded PDF |
+| POST | `/jobs/save` 🔒 | Save a job to the caller's board |
+| GET | `/jobs/saved` 🔒 | List the caller's saved jobs (optional `?status`) |
+| PATCH | `/jobs/saved/{job_id}/status` 🔒 | Update application status (404 if not owner) |
+| DELETE | `/jobs/saved/{job_id}` 🔒 | Remove a saved job (404 if not owner) |
+| POST | `/match/score` 🔒 | Score the caller's resume against job descriptions (cosine + skill gaps) |
+| POST | `/match/advice` 🔒 | Full Gemini advice (skill gaps, cover letter, interview tips) |
+| POST | `/interview/questions` 🔒 | Generate interview questions by type |
+| POST | `/interview/evaluate` 🔒 | Evaluate a mock-interview answer |
+| POST | `/agent/run` 🔒 | One-shot LangGraph pipeline from an uploaded PDF |
 | GET | `/` , `/health` | Liveness checks (inline in `main.py`, no prefix) |
 
 ## Data Model
@@ -188,10 +188,10 @@ Capabl/
 │   ├── dependencies.py         # get_db, get_current_user (JWT)
 │   ├── models/models.py        # ORM: users, resumes, saved_jobs, job_searches
 │   ├── schemas/schemas.py      # Pydantic request/response schemas
-│   ├── routers/
-│   │   ├── auth.py             # register, login, me
-│   │   ├── users.py            # create, get
-│   │   ├── resume.py           # upload, list, get, delete
+    │   ├── routers/
+    │   │   ├── auth.py             # register, login, me
+    │   │   ├── users.py            # create, me
+    │   │   ├── resume.py           # upload, list, get, delete
 │   │   ├── jobs.py             # search, save, saved, status, delete
 │   │   ├── match.py            # score, advice
 │   │   ├── interview.py        # questions, evaluate
@@ -204,8 +204,8 @@ Capabl/
 │   │   ├── llm_service.py      # Gemini: advice, resume summary
 │   │   ├── interview_service.py# Gemini: questions, answer evaluation
 │   │   └── career_agent.py     # LangGraph StateGraph
-│   ├── alembic/versions/001_initial.py   # single-head migration (all 4 tables)
-│   └── tests/                  # 53 tests across 8 files + conftest.py
+    │   ├── alembic/versions/001_initial.py   # single-head migration (all 4 tables)
+    │   └── tests/                  # 56 tests across 8 files + conftest.py
 └── frontend/
     └── src/
         ├── App.jsx             # routes + ProtectedRoute
@@ -222,11 +222,13 @@ Capabl/
 pytest backend/tests/ -v
 ```
 
-53 tests across 8 files: unit tests for the resume parser and TF-IDF matcher, a
+56 tests across 8 files: unit tests for the resume parser and TF-IDF matcher, a
 mocked-service test of the LangGraph agent, and FastAPI `TestClient` tests for the
 auth, users, resume-match, jobs, and interview endpoints. Tests run on SQLite and
 create tables via `Base.metadata.create_all` (not Alembic); `conftest.py` overrides
-`get_current_user`, so endpoint tests run as a fixed test user.
+`get_current_user`, so endpoint tests run as a fixed test user. The jobs test
+suite includes `test_save_job_other_user_isolated`, which inserts a `SavedJob`
+owned by another user and asserts the caller cannot list, mutate, or delete it.
 
 ## Database Migrations (Alembic)
 
@@ -243,32 +245,69 @@ There is one migration head, `001_initial`, which creates all four tables, the
 ## Deployment
 
 **Backend → Railway** (`railway.toml`): Dockerfile build (`backend/Dockerfile`,
-`python:3.11-slim`), Uvicorn on `$PORT`, healthcheck `/health`.
+`python:3.11-slim`), Uvicorn on `$PORT`, healthcheck `/health`. Railway
+services don't sleep like the Render free tier, so the backend stays
+awake at all times.
 
-**Frontend → Vercel** (`vercel.json`): set root to `frontend/`, build `npm run build`,
-output `dist`.
+**Frontend → Vercel** (`vercel.json`): set root to `frontend/`, build
+`npm run build`, output `dist`. The frontend talks to the Railway backend
+**directly** via axios using `VITE_API_URL` — there is no proxy in
+production, so the Vercel deployment is a pure static SPA.
 
-### ⚠️ Deploy-host mismatch (unresolved)
+### Required production env vars
 
-The repo currently disagrees on where the backend is hosted:
+**Railway service:**
 
-| Config | Points backend at |
-|--------|-------------------|
-| `railway.toml` | **Railway** (Dockerfile deploy) |
-| `frontend/.env.production` + `vercel.json` | **Render** (`career-platform-rtdk.onrender.com`) |
+| Var | Value |
+|-----|-------|
+| `DATABASE_URL` | Provided by the Railway Postgres addon (bare `postgres://` is auto-rewritten to `postgresql+psycopg://` in `database.py`). |
+| `REDIS_URL` | Provided by the Railway Redis addon (optional — code degrades gracefully if absent). |
+| `SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(48))"` — **must not** be a placeholder. |
+| `GEMINI_API_KEY` | Required for real AI output (advice, interview, summaries). |
+| `GEMINI_MODEL` | `gemini-2.5-flash` (default). |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Optional — without them, job search serves realistic mock Indian data. |
+| `CORS_ORIGINS` | Exact Vercel frontend origin, e.g. `https://career-platform.vercel.app` (no `*`, no trailing slash). |
+| `DEBUG` | `false` |
 
-Harmless while running locally, but **before deploying, pick one host** and make
-all three consistent (set `frontend/.env.production` → `VITE_API_URL` and the
-`vercel.json` rewrite to the chosen backend URL).
+Then apply the Alembic migration once against the production database:
+
+```bash
+# Locally, with the Railway DATABASE_URL exported:
+DATABASE_URL=postgresql://... alembic -c backend/alembic.ini upgrade head
+```
+
+The app's lifespan (`backend/main.py`) **no longer** calls
+`Base.metadata.create_all` — Alembic is the only path that creates tables.
+
+**Vercel project:**
+
+| Setting | Value |
+|---------|-------|
+| Root Directory | `frontend` |
+| `VITE_API_URL` | The Railway service URL, e.g. `https://career-platform.up.railway.app` (no trailing slash — axios appends `/api/v1`). |
+
+All three config files (`railway.toml`, `vercel.json`, and
+`frontend/.env.production`) are now consistent and point at the same
+Railway backend.
 
 ## Known Issues & Security
 
-Running **local-only** for now — a few issues are tracked but deliberately deferred:
+The BLOCKER and HIGH/MEDIUM security items (IDOR, default `SECRET_KEY`, CORS,
+unauthenticated user enumeration, stale-token UI) have all been resolved. The
+API is safe to expose publicly **as long as the production env vars satisfy the
+deployment checklist above** (`DEBUG=false`, a freshly generated `SECRET_KEY`,
+`CORS_ORIGINS` set to the exact Vercel origin, and a managed Postgres).
 
-- **Security (do not expose publicly yet):** several routes trust a client-supplied
-  `user_id` with no ownership check, some are unauthenticated (IDOR), and the
-  default `SECRET_KEY` is a placeholder. CORS is hardcoded to `*` in `main.py`.
-  Full details and recommended fixes: [`SECURITY_NOTES.md`](SECURITY_NOTES.md).
+- **Security (resolved):** all routes are now `Depends(get_current_user)` and
+  derive the owner from the JWT; resource-id routes return `404` (not `403`) on
+  ownership mismatch to avoid leaking existence. `backend/config.py::Settings.
+  assert_production_safe()` refuses to boot with a placeholder `SECRET_KEY` or
+  wildcard/empty CORS when `DEBUG=False`. Frontend now validates the stored
+  token on app boot. See [`SECURITY_NOTES.md`](SECURITY_NOTES.md) for the
+  per-item before/after.
+- **Cosmetic only:** the `password` field in `backend/schemas/schemas.py` has
+  no `max_length`, so a password over 72 bytes is silently truncated to 72
+  rather than rejected (bcrypt limit). Add `max_length=72` if desired.
 - **Matching caveat:** `/match/score` fits the resume and job together (shared
   vocabulary → meaningful score), but job-ranking fits each job's TF-IDF vector
   independently, so those ranking scores compare mismatched vocabularies — treat

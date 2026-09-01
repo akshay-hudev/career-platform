@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
+
 from backend.database import get_db
-from backend.models.models import Resume
+from backend.dependencies import get_current_user
+from backend.models.models import Resume, User
 from backend.services.interview_service import generate_interview_questions, evaluate_answer
 
 router = APIRouter(prefix="/api/v1/interview", tags=["Interview"])
@@ -43,16 +45,14 @@ class EvaluationOut(BaseModel):
 async def get_questions(
     request: GenerateQuestionsRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Generate tailored interview questions based on resume + job.
-    Types: technical | behavioral | situational | hr
-    """
+    """Generate tailored interview questions (auth required; resume must be owned by caller)."""
     if request.count < 1 or request.count > 10:
         raise HTTPException(status_code=400, detail="count must be between 1 and 10.")
 
     resume = db.query(Resume).filter(Resume.id == request.resume_id).first()
-    if not resume:
+    if not resume or resume.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Resume not found.")
 
     skills = (resume.parsed_data or {}).get("skills", [])
@@ -68,11 +68,12 @@ async def get_questions(
 
 
 @router.post("/evaluate", response_model=EvaluationOut)
-async def evaluate(request: EvaluateAnswerRequest):
-    """
-    Evaluate a candidate's mock interview answer.
-    Returns score, strengths, improvements, and a sample better answer.
-    """
+async def evaluate(
+    request: EvaluateAnswerRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Evaluate a candidate's mock interview answer (auth required to prevent
+    anonymous abuse of the Gemini quota)."""
     if len(request.user_answer.strip()) < 20:
         raise HTTPException(status_code=400, detail="Answer too short to evaluate meaningfully.")
 

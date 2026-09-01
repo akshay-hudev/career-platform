@@ -3,7 +3,7 @@ import unittest.mock as mock
 import io
 
 
-def _make_resume(client, user_id: int) -> int:
+def _make_resume(client, user_id: int = None) -> int:
     fake_pdf = (
         b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
         b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
@@ -20,7 +20,7 @@ def _make_resume(client, user_id: int) -> int:
         with mock.patch("backend.services.llm_service._model") as llm:
             llm.generate_content.return_value = mock.MagicMock(text="Python developer.")
             res = client.post(
-                f"/api/v1/resume/upload?user_id={user_id}",
+                "/api/v1/resume/upload",
                 files={"file": ("resume.pdf", io.BytesIO(fake_pdf), "application/pdf")},
             )
     return res.json()["id"]

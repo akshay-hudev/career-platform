@@ -114,15 +114,15 @@ export default function ResumeAnalysis() {
   const queryClient = useQueryClient()
 
   const { data: resumes = [], isLoading } = useQuery({
-    queryKey: ['resumes', user?.id],
-    queryFn: () => listResumes(user.id).then(r => r.data),
+    queryKey: ['resumes'],
+    queryFn: () => listResumes().then(r => r.data),
     enabled: !!user,
   })
 
   const uploadMutation = useMutation({
-    mutationFn: (file) => uploadResume(file, user.id),
+    mutationFn: (file) => uploadResume(file),
     onSuccess: () => {
-      queryClient.invalidateQueries(['resumes', user.id])
+      queryClient.invalidateQueries(['resumes'])
       toast.success('Resume parsed successfully!')
     },
     onError: (e) => toast.error(e.message),
@@ -131,7 +131,7 @@ export default function ResumeAnalysis() {
   const deleteMutation = useMutation({
     mutationFn: (resumeId) => deleteResume(resumeId),
     onSuccess: () => {
-      queryClient.invalidateQueries(['resumes', user.id])
+      queryClient.invalidateQueries(['resumes'])
       toast.success('Resume deleted.')
     },
     onError: (e) => toast.error(e.message),

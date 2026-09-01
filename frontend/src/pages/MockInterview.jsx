@@ -45,8 +45,8 @@ export default function MockInterview() {
   const [phase, setPhase] = useState('setup') // setup | interview | results
 
   const { data: resumes = [] } = useQuery({
-    queryKey: ['resumes', user?.id],
-    queryFn: () => listResumes(user.id).then(r => r.data),
+    queryKey: ['resumes'],
+    queryFn: () => listResumes().then(r => r.data),
     enabled: !!user,
   })
 

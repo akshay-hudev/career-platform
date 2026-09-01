@@ -19,8 +19,8 @@ export default function JobSearch() {
   const [results, setResults] = useState(null)
 
   const { data: resumes = [] } = useQuery({
-    queryKey: ['resumes', user?.id],
-    queryFn: () => listResumes(user.id).then(r => r.data),
+    queryKey: ['resumes'],
+    queryFn: () => listResumes().then(r => r.data),
     enabled: !!user,
   })
 
@@ -42,7 +42,7 @@ export default function JobSearch() {
       job_url: job.job_url,
       match_score: job.match_score,
       resume_id: selectedResumeId,
-    }, user.id),
+    }),
     onSuccess: (_, job) => {
       setSavedIds(prev => new Set([...prev, job.external_id]))
       toast.success('Job saved to your board!')

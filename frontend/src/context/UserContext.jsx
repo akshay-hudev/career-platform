@@ -1,5 +1,5 @@
-import { createContext, useContext, useState } from 'react'
-import { loginUser, registerUser } from '../api/client'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { getCurrentUser, loginUser, registerUser } from '../api/client'
 
 const UserContext = createContext(null)
 
@@ -12,6 +12,34 @@ export function UserProvider({ children }) {
   const [token, setToken] = useState(() => {
     return localStorage.getItem('career_token') || null
   })
+
+  // Validate the stored token on boot — clears stale/tampered tokens and
+  // forces a re-login instead of letting the user discover the issue on the
+  // first 401 from a protected API.
+  useEffect(() => {
+    const storedToken = localStorage.getItem('career_token')
+    if (!storedToken) return
+
+    let cancelled = false
+    getCurrentUser()
+      .then((res) => {
+        if (cancelled) return
+        // Refresh stored user with what the server actually returned.
+        const fresh = res.data
+        setUser(fresh)
+        localStorage.setItem('career_user', JSON.stringify(fresh))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setUser(null)
+        setToken(null)
+        localStorage.removeItem('career_user')
+        localStorage.removeItem('career_token')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const login = async (email, password) => {
     const res = await loginUser({ email, password })

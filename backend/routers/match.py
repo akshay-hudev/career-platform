@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models.models import Resume
+from backend.dependencies import get_current_user
+from backend.models.models import Resume, User
 from backend.schemas.schemas import (
     MatchRequest, MatchResponse, MatchResult,
     CareerAdviceRequest, CareerAdviceResponse,
@@ -13,15 +14,22 @@ from backend.services.llm_service import generate_career_advice
 router = APIRouter(prefix="/api/v1/match", tags=["Match"])
 
 
-@router.post("/score", response_model=MatchResponse)
-def score_matches(request: MatchRequest, db: Session = Depends(get_db)):
-    """
-    Score a resume against multiple job descriptions.
-    Returns cosine similarity scores + skill gap analysis.
-    """
-    resume = db.query(Resume).filter(Resume.id == request.resume_id).first()
-    if not resume:
+def _get_owned_resume(db: Session, resume_id: int, user_id: int) -> Resume:
+    """Fetch a resume and verify the caller owns it. 404 on mismatch."""
+    resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not resume or resume.user_id != user_id:
         raise HTTPException(status_code=404, detail="Resume not found.")
+    return resume
+
+
+@router.post("/score", response_model=MatchResponse)
+def score_matches(
+    request: MatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Score the caller's resume against multiple job descriptions (auth required)."""
+    resume = _get_owned_resume(db, request.resume_id, current_user.id)
     if not resume.embedding_json:
         raise HTTPException(status_code=422, detail="Resume has no embedding. Re-upload.")
 
@@ -42,26 +50,20 @@ def score_matches(request: MatchRequest, db: Session = Depends(get_db)):
 async def get_career_advice(
     request: CareerAdviceRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Full AI-powered career advice for a resume vs a specific job.
-    Includes ATS score, skill gaps, cover letter draft, and interview tips.
-    """
-    resume = db.query(Resume).filter(Resume.id == request.resume_id).first()
-    if not resume:
-        raise HTTPException(status_code=404, detail="Resume not found.")
+    """Full AI-powered career advice for the caller's resume vs a specific job."""
+    resume = _get_owned_resume(db, request.resume_id, current_user.id)
 
     if not resume.embedding_json:
         raise HTTPException(status_code=422, detail="Resume has no embedding. Re-upload.")
 
-    # Compute semantic match
     match = compute_match(
         resume_text=resume.raw_text,
         resume_embedding=resume.embedding_json,
         job_description=request.job_description,
     )
 
-    # Generate Gemini career advice
     advice = await generate_career_advice(
         resume_text=resume.raw_text,
         job_title=request.job_title,

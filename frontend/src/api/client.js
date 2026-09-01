@@ -36,17 +36,17 @@ export const loginUser = (data) => api.post('/auth/login', data)
 
 // ── Users ────────────────────────────────────────────────────────────────────
 export const createUser = (data) => api.post('/users/', data)
-export const getUser = (userId) => api.get(`/users/${userId}`)
+export const getCurrentUser = () => api.get('/users/me')
 
 // ── Resume ───────────────────────────────────────────────────────────────────
-export const uploadResume = (file, userId) => {
+export const uploadResume = (file) => {
   const form = new FormData()
   form.append('file', file)
-  return api.post(`/resume/upload?user_id=${userId}`, form, {
+  return api.post('/resume/upload', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
-export const listResumes = (userId) => api.get(`/resume/${userId}/list`)
+export const listResumes = () => api.get('/resume/list')
 export const getResume = (resumeId) => api.get(`/resume/${resumeId}`)
 export const deleteResume = (resumeId) => api.delete(`/resume/${resumeId}`)
 
@@ -55,11 +55,10 @@ export const searchJobs = (query, location, results = 20, resumeId = null) => {
   const params = { resume_id: resumeId }
   return api.post('/jobs/search', { query, location, results }, { params })
 }
-export const saveJob = (jobData, userId) =>
-  api.post(`/jobs/save?user_id=${userId}`, jobData)
-export const getSavedJobs = (userId, status = null) => {
+export const saveJob = (jobData) => api.post('/jobs/save', jobData)
+export const getSavedJobs = (status = null) => {
   const params = status ? { status } : {}
-  return api.get(`/jobs/saved/${userId}`, { params })
+  return api.get('/jobs/saved', { params })
 }
 export const updateJobStatus = (jobId, status, notes = null) =>
   api.patch(`/jobs/saved/${jobId}/status`, { status, notes })
