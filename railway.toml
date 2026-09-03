@@ -3,7 +3,8 @@ builder = "dockerfile"
 dockerfilePath = "backend/Dockerfile"
 
 [deploy]
+preDeployCommand = ["alembic -c backend/alembic.ini upgrade head"]
 startCommand = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
-restartPolicyType = "on_failure"
+restartPolicyType = "ON_FAILURE"

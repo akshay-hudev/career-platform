@@ -31,27 +31,27 @@ class Settings(BaseSettings):
     # App
     SECRET_KEY: str = "change-this-in-production"
     DEBUG: bool = True
-    # Comma-separated list of allowed origins, OR a JSON list. "*" is rejected
-    # in production below.
-    CORS_ORIGINS: list = ["*"]
+    # Keep this as a string: pydantic-settings eagerly JSON-decodes list fields,
+    # which would reject the convenient comma-separated form before our parser
+    # gets a chance to handle it.
+    CORS_ORIGINS: str = "*"
 
     class Config:
         env_file = ".env"
 
     def parse_cors_origins(self) -> list[str]:
         """Read CORS_ORIGINS from a JSON list or comma-separated string."""
-        raw = self.CORS_ORIGINS
-        if isinstance(raw, str):
-            raw = raw.strip()
-            if not raw:
-                return []
-            if raw.startswith("["):
-                try:
-                    return [o.strip() for o in json.loads(raw) if o.strip()]
-                except json.JSONDecodeError:
-                    pass
-            return [o.strip() for o in raw.split(",") if o.strip()]
-        return [str(o).strip() for o in raw if str(o).strip()]
+        raw = self.CORS_ORIGINS.strip()
+        if not raw:
+            return []
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(origin).strip() for origin in parsed if str(origin).strip()]
+            except json.JSONDecodeError:
+                pass
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 @lru_cache()

@@ -1,9 +1,8 @@
 # Deploy — Railway (backend) + Vercel (frontend)
 
-Step-by-step checklist for the production deploy. All three config files
-(`railway.toml`, `vercel.json`, `frontend/.env.production`) are already
-consistent and point at the same Railway backend — you only need to provide
-secret values and trigger a deploy.
+Step-by-step checklist for the production deploy. Deployment config is checked
+in; you only need to provision the services, provide secret values, and trigger
+a deploy.
 
 ## 0. Prerequisites (one-time)
 
@@ -42,15 +41,9 @@ Save the output. You'll paste it into both Railway (backend) and your local
 5. Set the **start command** (if not already in `railway.toml`) — it should be
    the existing `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`. The
    healthcheck is `/health` and the Dockerfile is `backend/Dockerfile`.
-6. **Apply the Alembic migration** against the production database once,
-   before the first deploy serves real traffic. Locally, with the Railway
-   `DATABASE_URL` exported:
-
-   ```bash
-   DATABASE_URL=postgresql://user:pass@host:port/db alembic -c backend/alembic.ini upgrade head
-   ```
-
-   The app's lifespan **does not** create tables — Alembic is the only path.
+6. The checked-in Railway `preDeployCommand` runs `alembic upgrade head`
+   automatically before every release. If a migration fails, Railway will not
+   start the new release. The app itself does not create tables.
 
 7. **Deploy.** The service gets a URL like
    `https://career-platform.up.railway.app`. Note this for step 2.
@@ -70,8 +63,8 @@ Save the output. You'll paste it into both Railway (backend) and your local
 1. New project → **Import** the same GitHub repo.
 2. **Project settings**:
    - **Root Directory** = `frontend`
-   - **Build Command** = `npm run build` (default, or pinned in `vercel.json`)
-   - **Output Directory** = `dist` (default, or pinned in `vercel.json`)
+   - **Build Command** = `npm run build` (pinned in `frontend/vercel.json`)
+   - **Output Directory** = `dist` (pinned in `frontend/vercel.json`)
    - **Framework Preset** = `Other` (so Vercel doesn't try to detect one)
 3. **Environment variables** (project settings → Environment Variables):
 
@@ -106,6 +99,6 @@ Save the output. You'll paste it into both Railway (backend) and your local
 | Backend boot fails with "SECRET_KEY is a placeholder" | `SECRET_KEY` is still a default value, or `DEBUG` is `True` (the guard only runs when `DEBUG=false`). |
 | Browser shows "Network Error" on every API call | `VITE_API_URL` is wrong (check the trailing slash, the protocol, the host). |
 | CORS error in browser console: "No 'Access-Control-Allow-Origin' header" | `CORS_ORIGINS` doesn't exactly match the Vercel origin (note `https://`, no trailing slash). |
-| `relation "users" does not exist` on first request | You forgot step 1.6 — run `alembic upgrade head` against the production DB. |
+| `relation "users" does not exist` on first request | Confirm Railway loaded the root `railway.toml` and inspect the pre-deploy logs for the Alembic run. |
 | `pydantic.ValidationError` on `CORS_ORIGINS` | It's being parsed as a string, not JSON. Use either `["https://a.com","https://b.com"]` (JSON) or `https://a.com,https://b.com` (comma-separated) — both work. |
 | Job search always returns the same canned list | `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` not set, **or** the request hit the mock fallback because the real API failed. Check Railway logs. |
