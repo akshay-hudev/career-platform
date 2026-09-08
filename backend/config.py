@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://postgres:password@localhost:5432/careerdb"
 
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = ""
 
     # Gemini
     GEMINI_API_KEY: str = ""

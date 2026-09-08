@@ -120,7 +120,7 @@ Backend settings are read from `.env` (see `.env.example`). Env vars and default
 | `GEMINI_API_KEY` | *(empty)* | **Required for real AI output** (advice, interview, summaries). Without it, those endpoints return canned fallback content instead of failing. |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name. |
 | `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | *(empty)* | Optional. Without them, job search serves realistic **mock** Indian job data. |
-| `SECRET_KEY` | `change-this-in-production` | Signs JWTs. **Must be overridden in production** — generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. The app refuses to boot when `DEBUG=false` and this is a placeholder. |
+| `SECRET_KEY` | `change-this-in-production` | Signs JWTs. **Must be overridden in production** — generate with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`. The app refuses to boot when `DEBUG=false` and this is a placeholder. |
 | `DATABASE_URL` | `postgresql+psycopg://postgres:password@localhost:5432/careerdb` | Postgres URL (psycopg v3). A bare `postgres://` / `postgresql://` is auto-rewritten to `postgresql+psycopg://`. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Job-search cache. If Redis is unreachable, caching no-ops (no crash). |
 | `DEBUG` | `True` | Debug flag. **Must be `false` in production** (enables the secret-key/CORS safety checks). |
@@ -244,51 +244,42 @@ There is one migration head, `001_initial`, which creates all four tables, the
 
 ## Deployment
 
-**Backend → Railway** (`railway.toml`): Dockerfile build (`backend/Dockerfile`,
-`python:3.11-slim`), Uvicorn on `$PORT`, healthcheck `/health`. Railway
-services don't sleep like the Render free tier, so the backend stays
-awake at all times.
+**Backend → Render** (`render.yaml`): Dockerfile build (`backend/Dockerfile`,
+`python:3.11-slim`), Alembic migrations before startup, Uvicorn on `$PORT`, and
+health check `/health`. The database is hosted on Neon PostgreSQL. Redis is
+optional.
 
 **Frontend → Vercel** (`vercel.json`): set root to `frontend/`, build
-`npm run build`, output `dist`. The frontend talks to the Railway backend
+`npm run build`, output `dist`. The frontend talks to the Render backend
 **directly** via axios using `VITE_API_URL` — there is no proxy in
 production, so the Vercel deployment is a pure static SPA.
 
 ### Required production env vars
 
-**Railway service:**
+**Render service:**
 
 | Var | Value |
 |-----|-------|
-| `DATABASE_URL` | Provided by the Railway Postgres addon (bare `postgres://` is auto-rewritten to `postgresql+psycopg://` in `database.py`). |
-| `REDIS_URL` | Provided by the Railway Redis addon (optional — code degrades gracefully if absent). |
-| `SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(48))"` — **must not** be a placeholder. |
+| `DATABASE_URL` | Neon pooled connection string (bare `postgresql://` is auto-rewritten to `postgresql+psycopg://`). |
+| `REDIS_URL` | Optional Upstash Redis protocol URL; omit it for the initial deployment. |
+| `SECRET_KEY` | `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` — **must not** be a placeholder. |
 | `GEMINI_API_KEY` | Required for real AI output (advice, interview, summaries). |
 | `GEMINI_MODEL` | `gemini-2.5-flash` (default). |
 | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | Optional — without them, job search serves realistic mock Indian data. |
 | `CORS_ORIGINS` | Exact Vercel frontend origin, e.g. `https://career-platform.vercel.app` (no `*`, no trailing slash). |
 | `DEBUG` | `false` |
 
-Then apply the Alembic migration once against the production database:
-
-```bash
-# Locally, with the Railway DATABASE_URL exported:
-DATABASE_URL=postgresql://... alembic -c backend/alembic.ini upgrade head
-```
-
-The app's lifespan (`backend/main.py`) **no longer** calls
-`Base.metadata.create_all` — Alembic is the only path that creates tables.
+The container applies Alembic migrations before each backend startup. The
+app's lifespan (`backend/main.py`) does not call `Base.metadata.create_all`.
 
 **Vercel project:**
 
 | Setting | Value |
 |---------|-------|
 | Root Directory | `frontend` |
-| `VITE_API_URL` | The Railway service URL, e.g. `https://career-platform.up.railway.app` (no trailing slash — axios appends `/api/v1`). |
+| `VITE_API_URL` | The Render service URL, e.g. `https://career-flow-api.onrender.com` (no trailing slash — axios appends `/api/v1`). |
 
-All three config files (`railway.toml`, `vercel.json`, and
-`frontend/.env.production`) are now consistent and point at the same
-Railway backend.
+See [deploy.md](deploy.md) for the complete Render + Neon + Vercel checklist.
 
 ## Known Issues & Security
 

@@ -7,10 +7,12 @@ from backend.config import settings
 
 # Redis client (optional — falls back gracefully if Redis not running)
 try:
+    if not settings.REDIS_URL:
+        raise ValueError("REDIS_URL is not configured")
     _redis = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
     _redis.ping()
     REDIS_AVAILABLE = True
-except Exception:
+except (ValueError, redis.RedisError):
     _redis = None
     REDIS_AVAILABLE = False
 

@@ -8,7 +8,7 @@ from alembic import context
 # (env.py is at <root>/backend/alembic/env.py, so go up two levels).
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from backend.database import Base
+from backend.database import Base, normalize_database_url
 from backend.models.models import User, Resume, SavedJob, JobSearch  # noqa: F401
 
 config = context.config
@@ -21,7 +21,11 @@ target_metadata = Base.metadata
 # Override sqlalchemy.url from environment variable if set
 db_url = os.environ.get("DATABASE_URL")
 if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+    # ConfigParser treats '%' as interpolation syntax. Escaping it preserves
+    # percent-encoded credentials from managed database connection strings.
+    config.set_main_option(
+        "sqlalchemy.url", normalize_database_url(db_url).replace("%", "%%")
+    )
 
 
 def run_migrations_offline() -> None:

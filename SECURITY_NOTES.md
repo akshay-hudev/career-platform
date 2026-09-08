@@ -58,10 +58,10 @@ The application lifespan (`backend/main.py`) calls this on startup; if
 to boot**. Generate a strong key with:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Set the result in the Railway service as `SECRET_KEY` (and in `.env` for local
+Set the result in the Render service as `SECRET_KEY` (and in `.env` for local
 development).
 
 ---
@@ -116,8 +116,8 @@ safe to expose publicly **as long as the deploy environment satisfies**:
 - `DEBUG=false`
 - `SECRET_KEY` is a freshly generated `secrets.token_urlsafe(48)` value
 - `CORS_ORIGINS` is the exact Vercel origin (no `*`, no empty)
-- `DATABASE_URL` is a managed Postgres (Railway Postgres or equivalent)
+- `DATABASE_URL` is the pooled Neon Postgres connection string
 - Migrations are applied via `alembic upgrade head` (no
   `Base.metadata.create_all` in the app lifespan — see `backend/main.py`)
 
-See `deploy.md` for the Railway + Vercel step-by-step.
+See `deploy.md` for the Render + Neon + Vercel step-by-step.
